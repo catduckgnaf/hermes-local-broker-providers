@@ -1,0 +1,6 @@
+name: codex-broker
+kind: model-provider
+version: 1.0.0
+description: Local OpenAI Codex broker provider profile for Hermes
+author: Catduck
+license: MIT

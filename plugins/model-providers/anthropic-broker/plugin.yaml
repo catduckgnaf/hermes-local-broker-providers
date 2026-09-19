@@ -1,0 +1,6 @@
+name: anthropic-broker
+kind: model-provider
+version: 1.0.0
+description: Local Anthropic OAuth broker provider profile for Hermes
+author: Catduck
+license: MIT
