@@ -5,6 +5,12 @@ Standalone Hermes model provider plugins for users who run local loopback broker
 * OpenAI Codex OAuth through `codex-broker`
 * Anthropic OAuth through `anthropic-broker`
 
+## Why this exists
+
+Hermes profiles are intentionally isolated, which is useful for specialist agents but makes provider authentication repetitive at fleet scale. I run a large set of specialist profiles and was spending too much time handling repeated OAuth and reauthentication problems across the fleet. A local broker gives those profiles one stable Hermes facing endpoint while the broker handles the provider credential and refresh lifecycle in one place.
+
+This project is shared as a practical starting point for other Hermes users with the same problem. Contributions, additional broker compatibility, documentation improvements, and alternative deployment approaches are welcome. Please open an issue or pull request with the use case and the provider or broker involved.
+
 These plugins only register Hermes provider profiles. They do **not** include, start, authenticate, or proxy either broker. The broker remains a separate process owned and operated by the user.
 
 ## Included providers
