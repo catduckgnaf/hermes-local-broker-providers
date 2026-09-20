@@ -11,7 +11,12 @@ Hermes profiles are intentionally isolated, which is useful for specialist agent
 
 This project is shared as a practical starting point for other Hermes users with the same problem. Contributions, additional broker compatibility, documentation improvements, and alternative deployment approaches are welcome. Please open an issue or pull request with the use case and the provider or broker involved.
 
-These plugins only register Hermes provider profiles. They do **not** include, start, authenticate, or proxy either broker. The broker remains a separate process owned and operated by the user.
+The repository contains two layers:
+
+* Hermes model provider profiles under `plugins/model-providers/`
+* An optional standalone loopback broker runtime under `broker_runtime/`
+
+The provider plugins never expose or copy OAuth credentials. The optional runtime resolves the root Hermes profile's existing OAuth credentials per request and forwards only to the corresponding provider API.
 
 ## Included providers
 
@@ -36,6 +41,25 @@ cp -R plugins/model-providers/anthropic-broker \
 
 Use the profile specific `HERMES_HOME` when installing for a nondefault profile. Restart Hermes or start a new session so lazy provider discovery runs again.
 
+## Optional broker runtime
+
+Install the repository into a virtual environment that can import the Hermes checkout whose root OAuth credentials it will use:
+
+```bash
+python3 -m venv /opt/catduck-hermes-broker
+/opt/catduck-hermes-broker/bin/pip install \
+  git+https://github.com/catduckgnaf/hermes-local-broker-providers.git
+```
+
+Run one loopback service per provider:
+
+```bash
+catduck-hermes-broker start --provider openai-codex --host 127.0.0.1 --port 8645
+catduck-hermes-broker start --provider anthropic --host 127.0.0.1 --port 8646
+```
+
+The runtime imports Hermes's credential resolvers lazily. It therefore requires a compatible Hermes checkout on `PYTHONPATH`, but it does not modify that checkout or depend on the old local adapter branch. Keep the listeners on loopback. The client bearer is ignored and replaced with the centrally resolved OAuth credential.
+
 ## Configuration
 
 Select one of the providers in the normal Hermes model configuration or picker:
@@ -58,9 +82,9 @@ from providers import register_provider
 from providers.base import ProviderProfile
 ```
 
-It does not patch Hermes core files, replace the proxy implementation, or depend on Catduck's local adapter branch. If a future Hermes release changes the provider registration contract, the plugin may need a compatibility update, but Hermes updates cannot overwrite the plugin itself.
+It does not patch Hermes core files or depend on Catduck's local adapter branch. The optional runtime packages the narrow loopback proxy behavior separately while continuing to use Hermes's credential-resolution modules. If a future Hermes release changes provider registration or credential resolution, this package may need a compatibility update, but Hermes updates cannot overwrite it.
 
-This repository is a shareable provider profile, not a complete broker distribution. Users still need a compatible Codex broker or Anthropic broker implementation and their own provider authorization.
+This repository provides the provider profiles plus an optional broker runtime. Users still need their own provider authorization in the root Hermes profile.
 
 ## Development check
 

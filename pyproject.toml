@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "catduck-hermes-local-broker-providers"
+version = "1.1.0"
+description = "Hermes provider profiles and standalone loopback OAuth broker runtime"
+requires-python = ">=3.11"
+dependencies = ["aiohttp>=3.9"]
+
+[project.scripts]
+catduck-hermes-broker = "broker_runtime.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["broker_runtime*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
