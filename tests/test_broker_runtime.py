@@ -274,3 +274,107 @@ def test_proxy_sse_done_normalization():
     malformed = SseDoneTracker()
     malformed.feed(b"data: {BROKEN}\n\n")
     assert not malformed.should_append_done()
+
+
+async def _start_site(app):
+    from aiohttp import web
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    port = site._server.sockets[0].getsockname()[1]
+    return runner, f"http://127.0.0.1:{port}"
+
+
+def _sse_upstream(chunks, *, abort=False):
+    from aiohttp import web
+
+    async def stream(request):
+        await request.read()
+        response = web.StreamResponse(
+            status=200, headers={"Content-Type": "text/event-stream"}
+        )
+        await response.prepare(request)
+        for chunk in chunks:
+            await response.write(chunk)
+        if abort:
+            request.transport.close()
+            return response
+        await response.write_eof()
+        return response
+
+    app = web.Application()
+    app.router.add_post("/v1/messages", stream)
+    return app
+
+
+@pytest.mark.parametrize(
+    "chunks,expected_done",
+    [
+        (
+            [
+                b'data: {"choices":[{"delta":{},"finish_',
+                b'reason":"stop"}]}\n\n',
+            ],
+            1,
+        ),
+        (
+            [
+                b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
+                b"data: [DONE]\n\n",
+            ],
+            1,
+        ),
+    ],
+)
+def test_server_sse_forwarding_normalizes_done(chunks, expected_done):
+    import asyncio
+    from aiohttp import ClientSession
+
+    async def run():
+        upstream_runner, upstream_base = await _start_site(_sse_upstream(chunks))
+        proxy_runner, proxy_base = await _start_site(
+            create_app(_StaticAdapter(f"{upstream_base}/v1"))
+        )
+        try:
+            async with ClientSession() as session:
+                async with session.post(f"{proxy_base}/v1/messages", json={}) as response:
+                    assert response.status == 200
+                    assert "text/event-stream" in response.headers["Content-Type"]
+                    body = await response.read()
+        finally:
+            await proxy_runner.cleanup()
+            await upstream_runner.cleanup()
+        assert body.count(b"data: [DONE]") == expected_done
+        assert b'"finish_reason":"stop"' in body
+
+    asyncio.run(run())
+
+
+def test_server_sse_interruption_does_not_synthesize_done():
+    import asyncio
+    from aiohttp import ClientPayloadError, ClientSession
+
+    async def run():
+        chunks = [b'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n']
+        upstream_runner, upstream_base = await _start_site(
+            _sse_upstream(chunks, abort=True)
+        )
+        proxy_runner, proxy_base = await _start_site(
+            create_app(_StaticAdapter(f"{upstream_base}/v1"))
+        )
+        body = b""
+        try:
+            async with ClientSession() as session:
+                try:
+                    async with session.post(f"{proxy_base}/v1/messages", json={}) as response:
+                        body = await response.read()
+                except ClientPayloadError:
+                    pass
+        finally:
+            await proxy_runner.cleanup()
+            await upstream_runner.cleanup()
+        assert b"data: [DONE]" not in body
+
+    asyncio.run(run())
