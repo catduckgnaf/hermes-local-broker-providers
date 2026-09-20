@@ -43,22 +43,23 @@ Use the profile specific `HERMES_HOME` when installing for a nondefault profile.
 
 ## Optional broker runtime
 
-Install the repository into a virtual environment that can import the Hermes checkout whose root OAuth credentials it will use:
+Install the repository into the existing Hermes virtual environment. This makes Hermes's credential resolution modules available without modifying the source checkout:
 
 ```bash
-python3 -m venv /opt/catduck-hermes-broker
-/opt/catduck-hermes-broker/bin/pip install \
+"${HERMES_HOME:-$HOME/.hermes}/hermes-agent/venv/bin/pip" install \
   git+https://github.com/catduckgnaf/hermes-local-broker-providers.git
 ```
 
-Run one loopback service per provider:
+Run one loopback service per provider with that same interpreter:
 
 ```bash
-catduck-hermes-broker start --provider openai-codex --host 127.0.0.1 --port 8645
-catduck-hermes-broker start --provider anthropic --host 127.0.0.1 --port 8646
+"${HERMES_HOME:-$HOME/.hermes}/hermes-agent/venv/bin/catduck-hermes-broker" \
+  start --provider openai-codex --host 127.0.0.1 --port 8645
+"${HERMES_HOME:-$HOME/.hermes}/hermes-agent/venv/bin/catduck-hermes-broker" \
+  start --provider anthropic --host 127.0.0.1 --port 8646
 ```
 
-The runtime imports Hermes's credential resolvers lazily. It therefore requires a compatible Hermes checkout on `PYTHONPATH`, but it does not modify that checkout or depend on the old local adapter branch. Keep the listeners on loopback. The client bearer is ignored and replaced with the centrally resolved OAuth credential.
+The runtime imports Hermes's credential resolvers lazily, so it must run from a compatible Hermes virtual environment. It does not modify the Hermes source checkout or depend on the old local adapter branch. The CLI refuses non-loopback binds. The client bearer is ignored and replaced with the centrally resolved OAuth credential.
 
 ## Configuration
 

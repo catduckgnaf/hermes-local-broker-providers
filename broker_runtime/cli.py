@@ -14,7 +14,14 @@ def _err(message: str) -> None:
     print(message, file=sys.stderr)
 
 
+def _loopback_host(host: str) -> bool:
+    return str(host).strip().lower() in {"127.0.0.1", "localhost", "::1"}
+
+
 def cmd_start(args) -> int:
+    if not _loopback_host(args.host):
+        _err("Refusing non-loopback broker bind. Use 127.0.0.1, localhost, or ::1.")
+        return 2
     if not AIOHTTP_AVAILABLE:
         _err("The broker runtime requires aiohttp.")
         return 1

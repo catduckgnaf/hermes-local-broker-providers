@@ -99,7 +99,10 @@ class AnthropicOAuthAdapter(UpstreamAdapter):
                 return None
             replacement = pool.try_refresh_current() if status_code == 401 else None
             if replacement is None:
-                replacement = pool.mark_exhausted_and_rotate(status_code=status_code)
+                replacement = pool.mark_exhausted_and_rotate(
+                    status_code=status_code,
+                    api_key_hint=failed_credential.bearer,
+                )
             if replacement is None:
                 return None
             retry_cred = self._credential_from_entry(replacement)

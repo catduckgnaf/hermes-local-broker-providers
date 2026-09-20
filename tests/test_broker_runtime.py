@@ -16,6 +16,7 @@ from broker_runtime.adapters.base import UpstreamAdapter, UpstreamCredential
 from broker_runtime.adapters.anthropic import AnthropicOAuthAdapter
 from broker_runtime.adapters.codex import OpenAICodexAdapter
 from broker_runtime.server import create_app
+from broker_runtime.cli import _loopback_host
 
 
 @dataclass
@@ -43,7 +44,8 @@ class _Pool:
     def try_refresh_current(self):
         return self.entry
 
-    def mark_exhausted_and_rotate(self, *, status_code):
+    def mark_exhausted_and_rotate(self, *, status_code, api_key_hint=None, **_kwargs):
+        self.failed_key = api_key_hint
         return self.entry
 
 
@@ -106,6 +108,30 @@ def test_anthropic_adapter_rejects_api_key():
     )
     with pytest.raises(RuntimeError, match="requires an OAuth credential"):
         adapter.get_credential()
+
+
+def test_anthropic_rotation_attributes_the_failed_bearer():
+    pool = _Pool(_Entry(access_token="replacement"))
+    adapter = AnthropicOAuthAdapter(
+        load_credentials=lambda: pool,
+        is_oauth_token=lambda _token: True,
+        common_betas=lambda _url: [],
+        oauth_betas=(),
+        claude_code_version=lambda: "1.0.0",
+    )
+    failed = UpstreamCredential(bearer="failed-oauth", base_url="https://api.anthropic.com/v1")
+    adapter.get_retry_credential(failed_credential=failed, status_code=429)
+    assert pool.failed_key == "failed-oauth"
+
+
+@pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "::1"])
+def test_loopback_hosts_are_accepted(host):
+    assert _loopback_host(host)
+
+
+@pytest.mark.parametrize("host", ["0.0.0.0", "192.168.1.20", "example.com"])
+def test_non_loopback_hosts_are_rejected(host):
+    assert not _loopback_host(host)
 
 
 class _StaticAdapter(UpstreamAdapter):
@@ -175,3 +201,76 @@ def test_server_applies_adapter_headers_after_filtering_client_headers():
         assert captured["anthropic-version"] == "2023-06-01"
 
     asyncio.run(run())
+
+
+class _RetryAdapter(_StaticAdapter):
+    def __init__(self, base_url: str):
+        super().__init__(base_url)
+        self.retry_calls = 0
+
+    def get_retry_credential(self, *, failed_credential, status_code):
+        assert failed_credential.bearer == "broker-bearer"
+        assert status_code == 401
+        self.retry_calls += 1
+        return UpstreamCredential(bearer="fresh-bearer", base_url=self.base_url)
+
+
+def test_server_retries_once_with_replacement_credential():
+    import asyncio
+    from aiohttp import ClientSession, web
+
+    async def run():
+        seen = []
+
+        async def upstream(request):
+            seen.append(request.headers.get("Authorization"))
+            if len(seen) == 1:
+                return web.json_response({"error": "expired"}, status=401)
+            return web.json_response({"ok": True})
+
+        upstream_app = web.Application()
+        upstream_app.router.add_post("/v1/messages", upstream)
+        upstream_runner = web.AppRunner(upstream_app)
+        await upstream_runner.setup()
+        upstream_site = web.TCPSite(upstream_runner, "127.0.0.1", 0)
+        await upstream_site.start()
+        upstream_port = upstream_site._server.sockets[0].getsockname()[1]
+
+        adapter = _RetryAdapter(f"http://127.0.0.1:{upstream_port}/v1")
+        proxy_runner = web.AppRunner(create_app(adapter))
+        await proxy_runner.setup()
+        proxy_site = web.TCPSite(proxy_runner, "127.0.0.1", 0)
+        await proxy_site.start()
+        proxy_port = proxy_site._server.sockets[0].getsockname()[1]
+        try:
+            async with ClientSession() as session:
+                async with session.post(
+                    f"http://127.0.0.1:{proxy_port}/v1/messages", json={}
+                ) as response:
+                    assert response.status == 200
+                    await response.read()
+        finally:
+            await proxy_runner.cleanup()
+            await upstream_runner.cleanup()
+
+        assert seen == ["Bearer broker-bearer", "Bearer fresh-bearer"]
+        assert adapter.retry_calls == 1
+
+    asyncio.run(run())
+
+
+def test_proxy_sse_done_normalization():
+    from broker_runtime.sse_done import DONE_SSE_FRAME, SseDoneTracker
+
+    tracker = SseDoneTracker()
+    tracker.feed(b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n')
+    assert tracker.should_append_done()
+    assert DONE_SSE_FRAME == b"data: [DONE]\n\n"
+
+    existing = SseDoneTracker()
+    existing.feed(b"data: [DONE]\n\n")
+    assert not existing.should_append_done()
+
+    malformed = SseDoneTracker()
+    malformed.feed(b"data: {BROKEN}\n\n")
+    assert not malformed.should_append_done()
