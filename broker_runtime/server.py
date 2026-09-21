@@ -31,6 +31,9 @@ logger = logging.getLogger(__name__)
 _HOP_BY_HOP_HEADERS = frozenset({
     "host", "content-length", "connection", "keep-alive", "proxy-authenticate",
     "proxy-authorization", "te", "trailers", "transfer-encoding", "upgrade", "authorization",
+    # Anthropic clients may send a local broker key as x-api-key. Never leak that
+    # client credential upstream when the adapter supplies OAuth Authorization.
+    "x-api-key",
 })
 # aiohttp recomputes Content-Encoding/Content-Length on stream — let it.
 _RESPONSE_DROP_HEADERS = _HOP_BY_HOP_HEADERS | {"content-encoding", "content-length"}

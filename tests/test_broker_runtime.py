@@ -162,6 +162,7 @@ def test_server_applies_adapter_headers_after_filtering_client_headers():
 
         async def upstream(request):
             captured["authorization"] = request.headers.get("Authorization")
+            captured["x-api-key"] = request.headers.get("x-api-key")
             captured["x-app"] = request.headers.get("x-app")
             captured["anthropic-version"] = request.headers.get("anthropic-version")
             return web.json_response({"ok": True})
@@ -185,6 +186,7 @@ def test_server_applies_adapter_headers_after_filtering_client_headers():
                     f"http://127.0.0.1:{proxy_port}/v1/messages",
                     headers={
                         "Authorization": "Bearer attacker",
+                        "x-api-key": "local-broker-key",
                         "x-app": "attacker",
                         "anthropic-version": "attacker",
                     },
@@ -197,6 +199,7 @@ def test_server_applies_adapter_headers_after_filtering_client_headers():
             await upstream_runner.cleanup()
 
         assert captured["authorization"] == "Bearer broker-bearer"
+        assert captured["x-api-key"] is None
         assert captured["x-app"] == "broker"
         assert captured["anthropic-version"] == "2023-06-01"
 
